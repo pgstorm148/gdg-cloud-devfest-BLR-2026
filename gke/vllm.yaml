@@ -1,0 +1,64 @@
+# vLLM model server on GKE: Deployment + Service + PodMonitoring.
+# Prereqs: GPU node pool (L4 here), Secret "hf-token" with key "token",
+# and access to the gated model on Hugging Face.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-gemma
+  labels: { app: vllm-gemma }
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: vllm-gemma }
+  template:
+    metadata:
+      labels: { app: vllm-gemma }
+    spec:
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-l4
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:latest      # pin the exact tag you load-tested
+        args:
+        - --model=google/gemma-3-4b-it
+        - --max-model-len=8192              # bounds KV-cache memory per request
+        - --gpu-memory-utilization=0.90     # share of VRAM for weights + KV cache
+        - --enable-prefix-caching           # automatic prefix caching
+        ports:
+        - { name: http, containerPort: 8000 }
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom: { secretKeyRef: { name: hf-token, key: token } }
+        resources:
+          requests: { cpu: "4", memory: 24Gi, nvidia.com/gpu: "1" }
+          limits:   { cpu: "4", memory: 24Gi, nvidia.com/gpu: "1" }
+        readinessProbe:
+          httpGet: { path: /health, port: http }
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        volumeMounts:
+        - { name: dshm, mountPath: /dev/shm }
+      volumes:
+      - name: dshm
+        emptyDir: { medium: Memory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-gemma
+spec:
+  type: ClusterIP
+  selector: { app: vllm-gemma }
+  ports:
+  - { name: http, port: 8000, targetPort: http }
+---
+# Google Cloud Managed Service for Prometheus: scrape vLLM's /metrics
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: vllm-gemma
+spec:
+  selector:
+    matchLabels: { app: vllm-gemma }
+  endpoints:
+  - { port: http, path: /metrics, interval: 15s }

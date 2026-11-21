@@ -1,0 +1,28 @@
+# GKE Inference Gateway: Gateway + HTTPRoute pointing at an InferencePool.
+# The InferencePool and its endpoint picker are installed with the Helm chart
+# from the official guide (chart path and version change between releases):
+#   https://docs.cloud.google.com/kubernetes-engine/docs/how-to/deploy-gke-inference-gateway
+# Requires GKE 1.32.3+; the v1 InferencePool CRD ships by default from 1.34.0-gke.1626000.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: inference-gateway
+spec:
+  gatewayClassName: gke-l7-regional-external-managed   # or gke-l7-rilb (internal)
+  listeners:
+  - { name: http, protocol: HTTP, port: 80 }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vllm-gemma
+spec:
+  parentRefs:
+  - name: inference-gateway
+  rules:
+  - matches:
+    - path: { type: PathPrefix, value: / }
+    backendRefs:
+    - group: inference.networking.k8s.io
+      kind: InferencePool
+      name: vllm-gemma          # must match the InferencePool created by the Helm chart
