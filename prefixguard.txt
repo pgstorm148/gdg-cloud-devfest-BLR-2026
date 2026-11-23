@@ -1,0 +1,4 @@
+Link to Prefixguard for catching silent prefix issues.
+
+Github : https://github.com/pgstorm148/prefixguard
+Pypi : https://pypi.org/project/prefixguard/
